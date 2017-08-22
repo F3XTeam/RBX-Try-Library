@@ -45,7 +45,7 @@ function Attempt:Then(Callback)
 
 	-- Skip processing if attempt failed
 	if not self.Success then
-		table.insert(self.Hops, Callback);
+		self.Hops[#self.Hops + 1] = Callback;
 		return self;
 	end;
 
