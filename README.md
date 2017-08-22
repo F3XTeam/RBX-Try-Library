@@ -17,16 +17,18 @@ This method takes a callback of the form `Variant Callback(ReturnValues...)`, an
 If the first value in `ReturnValues...` is an `Attempt`, it will be executed and the method will process its return values. This allows for chaining, such as in:
 
 ```lua
-Try(Wait, 0.1)
+local HttpService = game:GetService("HttpService")
+
+Try(wait, 0.1)
 
     -- Try hashing the time
     :Then(function (Delta, ElapsedTime)
-        return Try(Game.HttpService.GetAsync, Game.HttpService, 'http://md5.jsontest.com/?text=' .. Delta)
+        return Try(HttpService.GetAsync, HttpService, 'http://md5.jsontest.com/?text=' .. Delta)
     end)
 
     -- Try decoding the response
     :Then(function (RawResponse)
-        return Try(Game.HttpService.JSONDecode, Game.HttpService, RawResponse)
+        return Try(HttpService.JSONDecode, HttpService, RawResponse)
     end)
 
     -- Print the decoded response data
@@ -41,7 +43,9 @@ This method takes a callback of the form `Variant Callback(String Error, String 
 If the first returned value from the attempt is an `Attempt`, it will be executed and the method will process its errors.
 
 ```lua
-Try(Game.HttpService.GetAsync, Game.HttpService, 'http://google.com/fakeurl')
+local HttpService = game:GetService("HttpService")
+
+Try(HttpService.GetAsync, HttpService, 'http://google.com/fakeurl')
     :Then(function (Data)
         print('Found', Data)
     end)
@@ -63,7 +67,9 @@ This method retries the attempt if it failed, and executes any methods that were
 You can use this method in combination with an attempt's :Catch method to retry a sequence of interdependent function calls that fail, and even limit the number of, or space out, retries. For example:
 
 ```lua
-Try(Game.HttpService.GetAsync, Game.HttpService, 'http://httpstat.us/503')
+local HttpService = game:GetService("HttpService")
+
+Try(HttpService.GetAsync, HttpService, 'http://httpstat.us/503')
     :Then(function (Data)
         print('Found', Data)
     end)
