@@ -24,7 +24,7 @@ local function Try(Function, ...)
 	self.Stack = debug.traceback();
 	self.LastArguments = { ... };
 	self.Hops = (not Success) and { Function } or nil;
-	self.Id = tostring(self):gsub('table', 'attempt');
+	self.Id = tostring(self);
 
 	return setmetatable(self, Attempt);
 
@@ -37,7 +37,7 @@ Attempt.__index = Attempt;
 
 -- Indicate type when converted to string (to aid in debugging)
 function Attempt:__tostring()
-	return self.Id
+	return self.Id:gsub('table', 'attempt');
 end;
 
 -- Attempt Methods
