@@ -1,37 +1,46 @@
+-- A library for controlling the flow of error-prone, interdependent functions
 -- @readme https://github.com/F3XTeam/RBX-Try-Library/blob/master/README.md
 
-local Attempt = {
-	_IsAttempt = true;	
-	RetryCount = 0;
-	Start = true;
-}
-Attempt.__index = Attempt
+-- Attempt Object
+local Attempt = {};
+
+-- pcall Helper
+local function PackageProtectedCall(...)
+	return ..., { select(2, ...) };
+end
+
+-- Attempt Generator
+local function Try(Function, ...)
+
+	-- Capture function execution response
+	local Success, Arguments = PackageProtectedCall(pcall(Function, ...))
+
+	-- Create new Attempt for chaining
+	local self = {}
+
+	-- Gather arguments to return from data
+	self.Arguments = Arguments;
+	self.Success = Success;
+	self.Stack = debug.traceback();
+	self.LastArguments = { ... };
+	self.Hops = (not Success) and { Function } or nil;
+	self.Id = tostring(self):gsub('table', 'attempt');
+
+	return setmetatable(self, Attempt);
+
+end;
+
+-- Default Values
+Attempt.RetryCount = 0;
+Attempt.Start = true;
+Attempt.__index = Attempt;
 
 -- Indicate type when converted to string (to aid in debugging)
 function Attempt:__tostring()
 	return self.Id
-end
-
-local function Try(Function, ...)
-	-- Capture function execution response
-	local Arguments = { pcall(Function, ...) };
-
-	-- Determine whether execution succeeded or failed
-	local Success = table.remove(Arguments, 1);
-
-	-- Create new Attempt for chaining
-	local self = {
-		-- Gather arguments to return from data
-		Arguments = Arguments,
-		Success = Success,		
-		Stack = debug.traceback(),
-		LastArguments = { ... },
-		Hops = (not Success) and { Function } or nil
-	}
-	self.Id = tostring(self):gsub('table', 'attempt');
-	return setmetatable(self, Attempt);
 end;
 
+-- Attempt Methods
 function Attempt:Then(Callback)
 
 	-- Update attempt state
@@ -39,7 +48,7 @@ function Attempt:Then(Callback)
 
 	-- Enter new attempt contexts if received
 	local FirstArgument = self.Arguments[1];
-	if self.Success and type(FirstArgument) == 'table' and FirstArgument._IsAttempt then
+	if self.Success and type(FirstArgument) == 'table' and getmetatable(FirstArgument) == Attempt then
 		self = FirstArgument;
 	end;
 
@@ -50,15 +59,14 @@ function Attempt:Then(Callback)
 	end;
 
 	-- Capture callback execution response
-	local Arguments = { pcall(Callback, unpack(self.Arguments)) };
-	local Success = table.remove(Arguments, 1);
+	local Success, Arguments = PackageProtectedCall(pcall(Callback, unpack(self.Arguments)))
 
 	-- Replace attempt state
-	self.Success = Success;
-	self.LastArguments = self.Arguments;
-	self.Arguments = Arguments;
 	self.Stack = debug.traceback();
-
+	self.Success = Success;
+	self.Arguments = Arguments;
+	self.LastArguments = self.Arguments;
+	
 	-- Track hops on failure
 	if not Success then
 		self.Hops = { Callback };
@@ -66,6 +74,7 @@ function Attempt:Then(Callback)
 
 	-- Return attempt for chaining
 	return self;
+
 end;
 
 function Attempt:Catch(...)
@@ -78,7 +87,8 @@ function Attempt:Catch(...)
 
 	-- Enter new attempt contexts if received
 	local FirstArgument = self.Arguments[1];
-	if type(FirstArgument) == 'table' and FirstArgument._IsAttempt then
+	
+	if type(FirstArgument) == 'table' and getmetatable(FirstArgument) == Attempt then
 		self = FirstArgument;
 	end;
 
@@ -110,6 +120,7 @@ function Attempt:Catch(...)
 
 	-- Return attempt for chaining
 	return self;
+
 end;
 
 function Attempt:Retry()
@@ -167,6 +178,7 @@ function Attempt:Retry()
 		-- Return the attempt
 		return self;
 	end;
+	
 end;
 
 return Try;
