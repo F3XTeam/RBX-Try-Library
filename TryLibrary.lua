@@ -1,189 +1,184 @@
-function Try(Function, ...)
+-- A library for controlling the flow of error-prone, interdependent functions
+-- @readme https://github.com/F3XTeam/RBX-Try-Library/blob/master/README.md
+
+-- Attempt Object
+local Attempt = {};
+
+-- pcall Helper
+local function PackageProtectedCall(...)
+	return ..., { select(2, ...) };
+end
+
+-- Attempt Generator
+local function Try(Function, ...)
 
 	-- Capture function execution response
-	local Data = { pcall(Function, ...) };
+	local Success, Arguments = PackageProtectedCall(pcall(Function, ...))
 
-	-- Determine whether execution succeeded or failed
-	local Success = Data[1];
-	
+	-- Create new Attempt for chaining
+	local self = {}
+
 	-- Gather arguments to return from data
-	local Arguments = { unpack(Data, 2) };
+	self.Arguments = Arguments;
+	self.Success = Success;
+	self.Stack = debug.traceback();
+	self.LastArguments = { ... };
+	self.Hops = (not Success) and { Function } or nil;
+	self.Id = tostring(self);
 
-	-- Return attempt for chaining
-	return setmetatable({
-		_IsAttempt = true,
-		Then = Then,
-		Catch = Catch,
-		Retry = Retry,
-		Success = Success,
-		Arguments = Arguments,
-		Stack = debug.traceback(),
-		LastArguments = { ... },
-		Hops = (not Success) and { Function } or nil,
-		RetryCount = 0,
-		Start = true
-
-	-- Indicate type when converted to string (to aid in debugging)
-	}, { __tostring = function () return 'Attempt' end })
+	return setmetatable(self, Attempt);
 
 end;
 
-function Then(Attempt, Callback)
+-- Default Values
+Attempt.RetryCount = 0;
+Attempt.Start = true;
+Attempt.__index = Attempt;
+
+-- Indicate type when converted to string (to aid in debugging)
+function Attempt:__tostring()
+	return self.Id:gsub('table', 'attempt');
+end;
+
+-- Attempt Methods
+function Attempt:Then(Callback)
 
 	-- Update attempt state
-	Attempt.Start = false;
+	self.Start = false;
 
 	-- Enter new attempt contexts if received
-	local FirstArgument = Attempt.Arguments[1];
-	if Attempt.Success and type(FirstArgument) == 'table' and FirstArgument._IsAttempt then
-		Attempt = FirstArgument;
+	local FirstArgument = self.Arguments[1];
+	if self.Success and type(FirstArgument) == 'table' and getmetatable(FirstArgument) == Attempt then
+		self = FirstArgument;
 	end;
 
 	-- Skip processing if attempt failed
-	if not Attempt.Success then
-		table.insert(Attempt.Hops, Callback);
-		return Attempt;
+	if not self.Success then
+		self.Hops[#self.Hops + 1] = Callback;
+		return self;
 	end;
 
 	-- Capture callback execution response
-	local Data = { pcall(Callback, unpack(Attempt.Arguments)) };
-	local Success = Data[1];
-	local Arguments = { unpack(Data, 2) };
+	local Success, Arguments = PackageProtectedCall(pcall(Callback, unpack(self.Arguments)))
 
 	-- Replace attempt state
-	Attempt.Success = Success;
-	Attempt.LastArguments = Attempt.Arguments;
-	Attempt.Arguments = Arguments;
-	Attempt.Stack = debug.traceback();
-
+	self.Stack = debug.traceback();
+	self.Success = Success;
+	self.Arguments = Arguments;
+	self.LastArguments = self.Arguments;
+	
 	-- Track hops on failure
 	if not Success then
-		Attempt.Hops = { Callback };
+		self.Hops = { Callback };
 	end
 
 	-- Return attempt for chaining
-	return Attempt;
+	return self;
 
 end;
 
-function Catch(Attempt, ...)
+function Attempt:Catch(...)
 
 	-- Capture all arguments
 	local Arguments = { ... };
 
-	-- Get target errors and the callback
-	local TargetErrors = { unpack(Arguments, 1, #Arguments - 1) };
-	local Callback = unpack(Arguments, #Arguments);
+	-- Get error count so callback = ErrorCount + 1
+	local ErrorCount = #Arguments - 1;
 
 	-- Enter new attempt contexts if received
-	local FirstArgument = Attempt.Arguments[1];
-	if type(FirstArgument) == 'table' and FirstArgument._IsAttempt then
-		Attempt = FirstArgument;
+	local FirstArgument = self.Arguments[1];
+	
+	if type(FirstArgument) == 'table' and getmetatable(FirstArgument) == Attempt then
+		self = FirstArgument;
 	end;
 
 	-- Proceed upon unhandled failure
-	if not Attempt.Success and not Attempt.Handled then
+	if not self.Success and not self.Handled then
 
 		-- Track hops
-		table.insert(Attempt.Hops, Arguments);
+		self.Hops[#self.Hops + 1] = Arguments;
 
 		-- Get error from failed attempt
-		local Error = Attempt.Arguments[1];
-
-		-- Filter errors if target errors were specified
-		if (#TargetErrors > 0) then
-			for _, TargetError in pairs(TargetErrors) do
-				if type(Error) == 'string' and Error:match(TargetError) then
-					Attempt.Handled = true;
-					return Try(Callback, Error, Attempt.Stack, Attempt);
-				end;
-			end;
+		local Error = self.Arguments[1];
 
 		-- Pass any error if no target errors were specified
-		elseif #TargetErrors == 0 then
-			Attempt.Handled = true;
-			return Try(Callback, Error, Attempt.Stack, Attempt);
+		if ErrorCount == 0 then
+			self.Handled = true;
+			return Try(Arguments[ErrorCount + 1], Error, self.Stack, self);
+
+		-- Filter errors if target errors were specified
+		elseif type(Error) == 'string' then
+			for a = 1, ErrorCount do
+				if Error:match(Arguments[a]) then
+					self.Handled = true;
+					return Try(Arguments[ErrorCount + 1], Error, self.Stack, self);
+				end;
+			end;
 		end;
 
 	end;
 
 	-- Return attempt for chaining
-	return Attempt;
+	return self;
 
 end;
 
-function Retry(Attempt)
+function Attempt:Retry()
 
 	-- Ensure attempt failed
-	if Attempt.Success then
-		return;
-	end;
+	if not self.Success then
+		-- Get hops and arguments
+		local Hops = self.Hops;
+		local Arguments = self.LastArguments;
+		local RetryCount = self.RetryCount + 1;
 
-	-- Get hops and arguments
-	local Hops = Attempt.Hops;
-	local Arguments = Attempt.LastArguments;
+		-- Reset attempt state		
+		self.Arguments = Arguments;
+		self.RetryCount = RetryCount;
+		self.Success, self.Hops, self.Handled = true;
 
-	-- Reset attempt state
-	Attempt.Hops = nil;
-	Attempt.Success = true;
-	Attempt.Arguments = Arguments;
-	Attempt.Handled = nil;
-	Attempt.RetryCount = Attempt.RetryCount and (Attempt.RetryCount + 1) or 1;
+		-- Restart attempts that failed from the start
+		if self.Start then
+			self = Try(Hops[1], Arguments);
 
-	-- Restart attempts that failed from the start
-	if Attempt.Start then
-		local NewAttempt = Try(Hops[1], Arguments);
-
-		-- Reset retry counter if reattempt succeeds
-		if NewAttempt.Success then
-			NewAttempt.RetryCount = 0;
+		-- Continue attempts that failed after the start
 		else
-			NewAttempt.RetryCount = Attempt.RetryCount;
-		end;
-
-		-- Apply each hop
-		for HopIndex, Hop in ipairs(Hops) do
-			if HopIndex > 1 then
-
-				-- Apply `then` hops
-				if type(Hop) == 'function' then
-					NewAttempt:Then(Hop);
-					
-				-- Apply `catch` hops
-				elseif type(Hop) == 'table' then
-					NewAttempt:Catch(unpack(Hop));
-				end;
-
-			end;
-		end;
-		
-		-- Return the new attempt
-		return NewAttempt;
-	
-	-- Continue attempts that failed after the start
-	else
-		for HopIndex, Hop in ipairs(Hops) do
-
-			-- Apply `then` hoops
-			if type(Hop) == 'function' then
-				Attempt:Then(Hop);
+			local Hop = Hops[1];
+			local HopMetatable = getmetatable(Hop);
 
 			-- Apply `catch` hops
-			elseif type(Hop) == 'table' then
-				Attempt:Catch(unpack(Hop));
-			end;
+			if type(Hop) == 'table' and (not HopMetatable or not HopMetatable.__call) then
+				self:Catch(unpack(Hop));
 			
-			-- Reset retry counter if reattempt succeeds
-			if HopIndex == 1 and Attempt.Success then
-				Attempt.RetryCount = 0;
+			-- Apply `then` hops
+			else
+				self:Then(Hop);
+			end;
+		end
+
+		-- Reset retry counter if reattempt succeeds
+		self.RetryCount = self.Success and 0 or RetryCount;
+
+		-- Apply each hop
+		for HopIndex = 2, #Hops do
+			local Hop = Hops[HopIndex];
+			local HopMetatable = getmetatable(Hop);
+
+			-- Apply `catch` hops
+			if type(Hop) == 'table' and (not HopMetatable or not HopMetatable.__call) then
+				self:Catch(unpack(Hop));
+			
+			-- Apply `then` hops
+			else
+				self:Then(Hop);
 			end;
 
 		end;
 
 		-- Return the attempt
-		return Attempt;
+		return self;
 	end;
-
+	
 end;
 
 return Try;
