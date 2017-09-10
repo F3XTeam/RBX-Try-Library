@@ -15,7 +15,8 @@ local function IsAttempt(Object)
 end;
 
 local function PackageProtectedCall(self, Success, ...)
-	-- Executes function with given arguments, saves results in attempt
+	--- Packages (self, pcall()) updates Attempt self
+	-- @returns Attempt self
 
 	-- Update attempt state with execution information
 	self.Success = Success;
