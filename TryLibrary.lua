@@ -1,24 +1,10 @@
 -- A library for controlling the flow of error-prone, interdependent functions
 -- @readme https://github.com/F3XTeam/RBX-Try-Library/blob/master/README.md
 
--- Define default Attempt properties
-local Attempt = {};
-Attempt.RetryCount = 0;
-Attempt._IsAttempt = true;
-Attempt.__index = Attempt;
-
--- Return attempt debugging ID when converted to string
-function Attempt:__tostring()
-	return self.Id:gsub('table', 'Attempt');
-end;
-
--- Result-packaging helper function
-local function PackageProtectedCall(...)
-	return ..., { select(2, ...) };
-end;
-
 local function IsAttempt(Object)
-	-- Returns whether given object is an attempt
+	--- Identifies whether an Object is of the Attempt class
+	-- @param table Object
+	-- @returns boolean whether _IsAttempt == true in a table's metatable
 
 	-- Get object metatable
 	local ObjectMetatable = getmetatable(Object);
@@ -28,30 +14,12 @@ local function IsAttempt(Object)
 
 end;
 
-local function Try(Function, ...)
-	-- Creates, starts, and returns a new attempt
-
-	-- Initialize new attempt
-	local self = {};
-	self.Id = tostring(self);
-	setmetatable(self, Attempt);
-
-	-- Run and return attempt for chaining
-	return self:Execute(Function, { ... });
-
-end;
-
-function Attempt:Execute(Function, Arguments)
+local function PackageProtectedCall(self, Success, ...)
 	-- Executes function with given arguments, saves results in attempt
 
-	-- Capture function execution results
-	local Success, Results = PackageProtectedCall(pcall(Function, unpack(Arguments)));
-
 	-- Update attempt state with execution information
-	self.Function = Function;
-	self.Arguments = Arguments;
 	self.Success = Success;
-	self.Results = Results;
+	self.Results = {...};
 
 	-- Get stack trace and start list of skipped operations on failure
 	if not Success then
@@ -62,6 +30,32 @@ function Attempt:Execute(Function, Arguments)
 	-- Return attempt for chaining
 	return self;
 
+end;
+
+-- Define default Attempt properties
+local Attempt = {};
+Attempt.RetryCount = 0;
+Attempt._IsAttempt = true;
+Attempt.__index = Attempt;
+
+local function Try(Function, ...)
+	--- Calls Function with (...) in protected mode, and returns chainable Attempt
+	-- @returns Attempt Object
+
+	-- Initialize new attempt
+	local self = {};
+	self.Id = tostring(self);
+	self.Function = Function;
+	self.Arguments = {...};
+
+	-- Run and return attempt for chaining
+	return PackageProtectedCall(setmetatable(self, Attempt), pcall(Function, ...));
+
+end;
+
+-- Return attempt debugging ID when converted to string
+function Attempt:__tostring()
+	return self.Id:gsub('table', 'Attempt');
 end;
 
 function Attempt:Then(Callback)
@@ -79,11 +73,11 @@ function Attempt:Then(Callback)
 		return self;
 	end;
 
-	-- Execute callback with results of last attempt
-	self:Execute(Callback, self.Results);
+	self.Function = Function;
+	self.Arguments = self.Results;
 
-	-- Return attempt for chaining
-	return self;
+	-- Execute callback with results of last attempt
+	return PackageProtectedCall(self, pcall(Function, unpack(self.Results)));
 
 end;
 
@@ -162,7 +156,7 @@ function Attempt:Retry()
 	self.RetryCount = self.RetryCount + 1;
 
 	-- Retry attempt
-	self:Execute(self.Function, self.Arguments);
+	PackageProtectedCall(self, pcall(self.Function, unpack(self.Arguments)));
 
 	-- Reset retry counter if retry succeded
 	if self.Success then
