@@ -1,188 +1,191 @@
-function Try(Function, ...)
+-- A library for controlling the flow of error-prone, interdependent functions
+-- @readme https://github.com/F3XTeam/RBX-Try-Library/blob/master/README.md
 
-	-- Capture function execution response
-	local Data = { pcall(Function, ...) };
+-- Define default Attempt properties
+local Attempt = {};
+Attempt.RetryCount = 0;
+Attempt._IsAttempt = true;
+Attempt.__index = Attempt;
 
-	-- Determine whether execution succeeded or failed
-	local Success = Data[1];
-	
-	-- Gather arguments to return from data
-	local Arguments = { unpack(Data, 2) };
+-- Return attempt debugging ID when converted to string
+function Attempt:__tostring()
+	return self.Id:gsub('table', 'Attempt');
+end;
 
-	-- Return attempt for chaining
-	return setmetatable({
-		_IsAttempt = true,
-		Then = Then,
-		Catch = Catch,
-		Retry = Retry,
-		Success = Success,
-		Arguments = Arguments,
-		Stack = debug.traceback(),
-		LastArguments = { ... },
-		Hops = (not Success) and { Function } or nil,
-		RetryCount = 0,
-		Start = true
+-- Result-packaging helper function
+local function PackageProtectedCall(...)
+	return ..., { select(2, ...) };
+end;
 
-	-- Indicate type when converted to string (to aid in debugging)
-	}, { __tostring = function () return 'Attempt' end })
+local function IsAttempt(Object)
+	-- Returns whether given object is an attempt
+
+	-- Get object metatable
+	local ObjectMetatable = getmetatable(Object);
+
+	-- Return whether metatable indicates object is an attempt
+	return ObjectMetatable and ObjectMetatable._IsAttempt or false;
 
 end;
 
-function Then(Attempt, Callback)
+local function Try(Function, ...)
+	-- Creates, starts, and returns a new attempt
 
-	-- Update attempt state
-	Attempt.Start = false;
+	-- Initialize new attempt
+	local self = {};
+	self.Id = tostring(self);
+	setmetatable(self, Attempt);
 
-	-- Enter new attempt contexts if received
-	local FirstArgument = Attempt.Arguments[1];
-	if Attempt.Success and type(FirstArgument) == 'table' and FirstArgument._IsAttempt then
-		Attempt = FirstArgument;
-	end;
+	-- Run and return attempt for chaining
+	return self:Execute(Function, { ... });
 
-	-- Skip processing if attempt failed
-	if not Attempt.Success then
-		table.insert(Attempt.Hops, Callback);
-		return Attempt;
-	end;
+end;
 
-	-- Capture callback execution response
-	local Data = { pcall(Callback, unpack(Attempt.Arguments)) };
-	local Success = Data[1];
-	local Arguments = { unpack(Data, 2) };
+function Attempt:Execute(Function, Arguments)
+	-- Executes function with given arguments, saves results in attempt
 
-	-- Replace attempt state
-	Attempt.Success = Success;
-	Attempt.LastArguments = Attempt.Arguments;
-	Attempt.Arguments = Arguments;
-	Attempt.Stack = debug.traceback();
+	-- Capture function execution results
+	local Success, Results = PackageProtectedCall(pcall(Function, unpack(Arguments)));
 
-	-- Track hops on failure
+	-- Update attempt state with execution information
+	self.Function = Function;
+	self.Arguments = Arguments;
+	self.Success = Success;
+	self.Results = Results;
+
+	-- Get stack trace and start list of skipped operations on failure
 	if not Success then
-		Attempt.Hops = { Callback };
-	end
+		self.Stack = debug.traceback();
+		self.Skips = {};
+	end;
 
 	-- Return attempt for chaining
-	return Attempt;
+	return self;
 
 end;
 
-function Catch(Attempt, ...)
+function Attempt:Then(Callback)
+	-- Passes attempt results to callback, and returns attempt for chaining
 
-	-- Capture all arguments
+	-- Enter new attempt context if received
+	local FirstArgument = self.Results[1];
+	if self.Success and IsAttempt(FirstArgument) then
+		self = FirstArgument;
+	end;
+
+	-- Skip callback if attempt failed
+	if not self.Success then
+		self.Skips[#self.Skips + 1] = Callback;
+		return self;
+	end;
+
+	-- Execute callback with results of last attempt
+	self:Execute(Callback, self.Results);
+
+	-- Return attempt for chaining
+	return self;
+
+end;
+
+function Attempt:Catch(...)
+	-- Passes errors in failed attempt to given callback, returns attempt for chaining
+
+	-- Enter new attempt context if received
+	local FirstArgument = self.Results[1];
+	if self.Success and IsAttempt(FirstArgument) then
+		self = FirstArgument;
+	end;
+
+	-- Skip catching if attempt succeeded
+	if self.Success or self.Handled then
+		return self;
+	end;
+
+	-- Get arguments
 	local Arguments = { ... };
 
-	-- Get target errors and the callback
-	local TargetErrors = { unpack(Arguments, 1, #Arguments - 1) };
-	local Callback = unpack(Arguments, #Arguments);
+	-- Get predicate count and callback
+	local PredicateCount = #Arguments - 1;
+	local Callback = Arguments[PredicateCount + 1];
 
-	-- Enter new attempt contexts if received
-	local FirstArgument = Attempt.Arguments[1];
-	if type(FirstArgument) == 'table' and FirstArgument._IsAttempt then
-		Attempt = FirstArgument;
+	-- Track catching operation for future retry attempts
+	self.Skips[#self.Skips + 1] = Arguments;
+
+	-- Get attempt error
+	local Error = self.Results[1];
+	local HandleError = false;
+
+	-- Handle any error if no predicates specified
+	if PredicateCount == 0 then
+		HandleError = true;
+
+	-- Handle matching error if predicates specified
+	elseif type(Error) == 'string' then
+		for PredicateId = 1, PredicateCount do
+			if Error:match(Arguments[PredicateId]) then
+				HandleError = true;
+				break;
+			end;
+		end;
 	end;
 
-	-- Proceed upon unhandled failure
-	if not Attempt.Success and not Attempt.Handled then
-
-		-- Track hops
-		table.insert(Attempt.Hops, Arguments);
-
-		-- Get error from failed attempt
-		local Error = Attempt.Arguments[1];
-
-		-- Filter errors if target errors were specified
-		if (#TargetErrors > 0) then
-			for _, TargetError in pairs(TargetErrors) do
-				if type(Error) == 'string' and Error:match(TargetError) then
-					Attempt.Handled = true;
-					return Try(Callback, Error, Attempt.Stack, Attempt);
-				end;
-			end;
-
-		-- Pass any error if no target errors were specified
-		elseif #TargetErrors == 0 then
-			Attempt.Handled = true;
-			return Try(Callback, Error, Attempt.Stack, Attempt);
-		end;
-
+	-- Attempt passing error to callback, and return attempt on success
+	if HandleError then
+		return Try(Callback, Error, self.Stack, self):Then(function ()
+			self.Handled = true;
+			return self;
+		end);
 	end;
 
 	-- Return attempt for chaining
-	return Attempt;
+	return self;
 
 end;
 
-function Retry(Attempt)
+function Attempt:Retry()
+	-- Retries attempt from first failure, applies skipped operations, and returns resulting attempt
 
-	-- Ensure attempt failed
-	if Attempt.Success then
+	-- Skip retrying if attempt succeeded
+	if self.Success then
 		return;
 	end;
 
-	-- Get hops and arguments
-	local Hops = Attempt.Hops;
-	local Arguments = Attempt.LastArguments;
+	-- Get skips after attempt failure
+	local Skips = self.Skips;
 
-	-- Reset attempt state
-	Attempt.Hops = nil;
-	Attempt.Success = true;
-	Attempt.Arguments = Arguments;
-	Attempt.Handled = nil;
-	Attempt.RetryCount = Attempt.RetryCount and (Attempt.RetryCount + 1) or 1;
+	-- Reset attempt for reexecution
+	self.Handled = nil;
+	self.Skips = nil;
+	self.Stack = nil;
 
-	-- Restart attempts that failed from the start
-	if Attempt.Start then
-		local NewAttempt = Try(Hops[1], Arguments);
+	-- Increment retry counter
+	self.RetryCount = self.RetryCount + 1;
 
-		-- Reset retry counter if reattempt succeeds
-		if NewAttempt.Success then
-			NewAttempt.RetryCount = 0;
-		else
-			NewAttempt.RetryCount = Attempt.RetryCount;
-		end;
+	-- Retry attempt
+	self:Execute(self.Function, self.Arguments);
 
-		-- Apply each hop
-		for HopIndex, Hop in ipairs(Hops) do
-			if HopIndex > 1 then
-
-				-- Apply `then` hops
-				if type(Hop) == 'function' then
-					NewAttempt:Then(Hop);
-					
-				-- Apply `catch` hops
-				elseif type(Hop) == 'table' then
-					NewAttempt:Catch(unpack(Hop));
-				end;
-
-			end;
-		end;
-		
-		-- Return the new attempt
-		return NewAttempt;
-	
-	-- Continue attempts that failed after the start
-	else
-		for HopIndex, Hop in ipairs(Hops) do
-
-			-- Apply `then` hoops
-			if type(Hop) == 'function' then
-				Attempt:Then(Hop);
-
-			-- Apply `catch` hops
-			elseif type(Hop) == 'table' then
-				Attempt:Catch(unpack(Hop));
-			end;
-			
-			-- Reset retry counter if reattempt succeeds
-			if HopIndex == 1 and Attempt.Success then
-				Attempt.RetryCount = 0;
-			end;
-
-		end;
-
-		-- Return the attempt
-		return Attempt;
+	-- Reset retry counter if retry succeded
+	if self.Success then
+		self.RetryCount = nil;
 	end;
+
+	-- Apply skipped operations
+	for SkipIndex = 1, #Skips do
+		local Skip = Skips[SkipIndex];
+		local SkipMetatable = getmetatable(Skip);
+
+		-- Apply callables as `then` operations
+		if type(Skip) == 'function' or (SkipMetatable and SkipMetatable.__call) then
+			self = self:Then(Skip);
+
+		-- Apply non-callables as `catch` operations
+		else
+			self = self:Catch(unpack(Skip));
+		end;
+	end;
+
+	-- Return attempt for chaining
+	return self;
 
 end;
 
