@@ -1,20 +1,28 @@
-# RBX.Lua Try Library
-A library for controlling the flow of error-prone, interdependent functions. [Get a built module on Roblox here.](https://www.roblox.com/library/987135020/Try-Library-from-F3X)
+# Try
+An asynchronous pcall-wrapper library for controlling the flow of error-prone, interdependent functions. [Get a built module on Roblox here](https://www.roblox.com/library/987135020/Try-Library-from-F3X), or [install it thorough the RoStrap plugin.](https://www.roblox.com/library/725884332/RoStrap)
 
 ## How to use
-Include the library's Try function by requiring the module.
-
+Upon requiring the Library, it returns a function called Try:
 ```lua
+-- Without RoStrap
 local Try = require(TryLibrary)
 ```
+```lua
+-- With RoStrap
+local require = require(ReplicatedStorage:WaitForChild("Resources")).LoadLibrary
 
-### Try(Function, Arguments...) → Attempt
-This function attempts calling `Function` with the given list of `Arguments...`, and returns an `Attempt`, which :Then and :Catch methods can be chained to.
+local Try = require("Try")
+```
 
-### Attempt:Then(Function `Callback`) → Attempt
-This method takes a callback of the form `Variant Callback(ReturnValues...)`, and calls it **if the attempt succeeded**, with `ReturnValues...` being the list of values returned in the attempt. The attempt is then returned for chaining.
+### API
+`Attempt Try(Function, ...)`
 
-If the first value in `ReturnValues...` is an `Attempt`, it will be executed and the method will process its return values. This allows for chaining, such as in:
+`Try` calls `pcall(Function, ...)` **on a separate thread**, and returns a table Object called an `Attempt`.
+
+#### Attempt
+`Attempt :Then(Callback)`
+
+This method takes a callback of the form `<function, callable table> Callback(...)`, and pcalls it **if the previous pcall didn't error**, with `...` being that which was returned by that `pcall`. This also returns the attempt, for further chaining.
 
 ```lua
 local HttpService = game:GetService('HttpService')
@@ -23,12 +31,12 @@ Try(wait, 0.1)
 
     -- Try hashing the time
     :Then(function (Delta, ElapsedTime)
-        return Try(HttpService.GetAsync, HttpService, 'http://md5.jsontest.com/?text=' .. Delta)
+        return HttpService:GetAsync('http://md5.jsontest.com/?text=' .. Delta)
     end)
 
     -- Try decoding the response
     :Then(function (RawResponse)
-        return Try(HttpService.JSONDecode, HttpService, RawResponse)
+        return HttpService:JSONDecode(RawResponse)
     end)
 
     -- Print the decoded response data
@@ -37,15 +45,16 @@ Try(wait, 0.1)
     end)
 ```
 
-### Attempt:Catch([String `Predicates...`], Function `Callback`) → Attempt
-This method takes a callback of the form `Variant Callback(String Error, String Stack, Attempt FailedAttempt)`, and calls it **if the attempt had an error**. Errors can be optionally filtered by providing a list of [patterns which the error should match](http://wiki.roblox.com/index.php?title=String_pattern#Simple_matching), otherwise all errors are caught by the function. Once an attempt's error is caught, it will not be caught by the next chained :Catch method, unless `Callback` itself has an error. The attempt is then returned for chaining.
+`Attempt :Catch([string Patterns...], Callback)`
+
+This method takes a callback of the form `Variant Callback(string Error, string Stack, Attempt FailedAttempt)`, and pcalls it **if the previous pcall had an error**. Errors can be optionally filtered by providing a list of [patterns which the error should match](http://wiki.roblox.com/index.php?title=String_pattern#Simple_matching), otherwise all errors are caught by the function. Once an attempt's error is caught, it will not be caught by the next chained `:Catch` method, unless `Callback` itself has an error. The attempt is then returned for chaining.
 
 If the first returned value from the attempt is an `Attempt`, it will be executed and the method will process its errors.
 
 ```lua
 local HttpService = game:GetService('HttpService')
 
-Try(HttpService.GetAsync, HttpService, 'http://google.com/fakeurl')
+Try(HttpService.GetAsync, HttpService, 'http://httpstat.us/404')
     :Then(function (Data)
         print('Found', Data)
     end)
@@ -61,10 +70,13 @@ Try(HttpService.GetAsync, HttpService, 'http://google.com/fakeurl')
     end)
 ```
 
-### Attempt:Retry() → Attempt
-This method retries the attempt if it failed, and executes any methods that were chained to it. `Attempt.RetryCount` is incremented each time the attempt is retried, and is reset if a retry succeeds.
+[httpstat.us](http://httpstat.us/) is a good way to test Http request errors.
 
-You can use this method in combination with an attempt's :Catch method to retry a sequence of interdependent function calls that fail, and even limit the number of, or space out, retries. For example:
+`Attempt :Retry()`
+
+This method can only be called within a `Catch` callback. It retries the last function called in the chain before the error (with the same old arguments). `Attempt.RetryCount` is incremented each time the attempt is retried, and is reset after a `Retry` `pcall` doesn't error.
+
+You can use this method to retry a sequence of interdependent function calls that fail, and even limit the number of, or space out, retries. For example:
 
 ```lua
 local HttpService = game:GetService('HttpService')
@@ -99,4 +111,31 @@ Try(HttpService.GetAsync, HttpService, 'http://httpstat.us/503')
     :Catch(function (Error, Stack, Attempt)
         warn('Unknown error:', Error)
     end)
+```
+
+`Attempt :Wait()`
+
+This method yields until all of the pcalls before it have finished running.
+
+```lua
+Try(wait, 0.5)
+    :Then(wait)
+    :Wait()
+print("Hello!") -- Runs after all of the threads finish
+```
+
+A `:Wait()` can go anywhere in the Chain:
+
+```lua
+local Attempt = Try(wait, 2)
+
+print("Hey!") -- This runs immediately after Try is called on a separate thread
+
+Attempt
+    :Wait() -- Wait until this Attempt's thread finishes yielding
+    :Then(function(...) -- This is still on a separate thread
+        wait(1)
+        print("This was returned by wait(2)", ...)
+    end)
+print("The Attempt has finished yielding!")
 ```
