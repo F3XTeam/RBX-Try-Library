@@ -3,24 +3,21 @@
 -- @readme https://github.com/F3XTeam/RBX-Try-Library/blob/master/README.md
 
 local function Package(self, Position, Success, Error, ...)
-	local Count = self.Count
 	if Success then
 		-- Don't enter `Then` from a `Catch`
-		if self[Position] == 2 then
-			-- Make sure we don't ever resume
-			Count = Position + 1
-		else
-			for Position = Position + 2, Count, 2 do
+		if self[Position] ~= 2 then
+			for Position = Position + 3, self.Count, 3 do
 				-- Enter next `Then` function
 				if self[Position] == 1 then
 					self.LastArguments = {Error, ...}
+					self.Traceback = self.Traceback .. self[Position + 2]
 					return Package(self, Position, pcall(self[Position + 1], Error, ...)) -- Call next Then with arguments
 				end
 			end
 		end
 	else
 		self.ErrorPosition = Position
-		for Position = Position + 2, Count, 2 do
+		for Position = Position + 3, self.Count, 3 do
 			-- Enter next `Catch` function
 			if self[Position] == 2 then
 				-- Get arguments and predicate count
@@ -29,21 +26,22 @@ local function Package(self, Position, Success, Error, ...)
 
 				-- Handle any error if no predicates specified
 				if PredicateCount == 0 then
-					return Package(self, Position, pcall(Arguments[PredicateCount + 1], Error, debug.traceback(), self))
+					self.Traceback = self.Traceback .. self[Position + 2]
+					return Package(self, Position, pcall(Arguments[PredicateCount + 1], Error, self.Traceback .. "Stack End", self))
 
 				-- Handle matching error if predicates specified
 				elseif type(Error) == 'string' then
-					for PredicateId = 1, PredicateCount do
-						if Error:match(Arguments[PredicateId]) then
-							return Package(self, Position, pcall(Arguments[PredicateCount + 1], Error, debug.traceback(), self))
+					for Predicate = 1, PredicateCount do
+						if Error:match(Arguments[Predicate]) then
+							self.Traceback = self.Traceback .. self[Position + 2]
+							return Package(self, Position, pcall(Arguments[PredicateCount + 1], Error, self.Traceback .. "Stack End", self))
 						end
 					end
 				end
-
 			end
 		end
 	end
-	return {self, Count - 1, Success, Error, ...}
+	return {self, Position, Success, Error, ...}
 end
 
 -- Define default Attempt properties
@@ -59,8 +57,9 @@ local function Try(Function, ...)
 	local Bindable = Instance.new("BindableEvent")
 
 	local self = setmetatable({
-		[0] = Function;
+		[-1] = Function;
 		Bindable = Bindable;
+		Traceback = "Stack Begin\n" .. debug.traceback():match("Try[\n\r]([^\n\r]+)") .. " - upvalue Try\n";
 		LastArguments = {...};
 	}, Attempt)
 
@@ -82,7 +81,7 @@ local function Try(Function, ...)
 		end
 	end)
 
-	Bindable:Fire(-1)
+	Bindable:Fire(-2)
 
 	return self
 end
@@ -95,10 +94,11 @@ function Attempt:__tostring()
 end
 
 function Attempt:Then(Function)
-	local Count = self.Count + 2
+	local Count = self.Count + 3
 	self.Count = Count
-	self[Count - 1] = 1
-	self[Count] = Function
+	self[Count - 2] = 1
+	self[Count - 1] = Function
+	self[Count] = debug.traceback():match("%- method Then[\n\r]([^\n\r]+)") .. " - method Then\n"
 
 	if self.Resolved then
 		self.Resolved = false
@@ -109,10 +109,11 @@ function Attempt:Then(Function)
 end
 
 function Attempt:Catch(...)
-	local Count = self.Count + 2
+	local Count = self.Count + 3
 	self.Count = Count
-	self[Count - 1] = 2
-	self[Count] = {...}
+	self[Count - 2] = 2
+	self[Count - 1] = {...}
+	self[Count] = debug.traceback():match("%- method Catch[\n\r]([^\n\r]+)") .. " - method Catch\n"
 
 	if self.Resolved and self.ErrorPosition then
 		self.Resolved = false
