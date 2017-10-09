@@ -1,5 +1,5 @@
 # Try
-An asynchronous pcall-wrapper library for controlling the flow of error-prone, interdependent functions. [Get a built module on Roblox here](https://www.roblox.com/library/987135020/Try-Library-from-F3X), or [install it thorough the RoStrap plugin.](https://www.roblox.com/library/725884332/RoStrap)
+An asynchronous pcall-wrapper library for controlling the flow of error-prone, interdependent functions. [Get a built module on Roblox here](https://www.roblox.com/library/987135020/Try-Library-from-F3X), or [install it through the RoStrap plugin.](https://www.roblox.com/library/725884332/RoStrap)
 
 ## How to use
 Upon requiring the Library, it returns a function called Try:
