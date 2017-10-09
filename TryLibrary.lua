@@ -1,4 +1,3 @@
-
 -- An asynchronous pcall-wrapper for interdependent error-prone functions
 -- @author Validark
 -- @readme https://github.com/F3XTeam/RBX-Try-Library/blob/master/README.md
