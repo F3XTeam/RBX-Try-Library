@@ -9,9 +9,9 @@ local Try = require(TryLibrary)
 ```
 ```lua
 -- With RoStrap
-local require = require(ReplicatedStorage:WaitForChild("Resources")).LoadLibrary
+local Resources = require(ReplicatedStorage:WaitForChild("Resources"))
 
-local Try = require("Try")
+local Try = Resources:LoadLibrary("Try")
 ```
 
 ### API
