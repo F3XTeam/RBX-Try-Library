@@ -6,14 +6,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Resources = require(ReplicatedStorage:WaitForChild("Resources"))
 local Enumeration = Resources:LoadLibrary("Enumeration")
 
-Enumeration.StatementTypes = {"Try", "Then", "Catch", "Retry"}
+Enumeration.AttemptType = {"Try", "Then", "Catch", "Retry"}
 
 local function Continue(self, Position, HistoryCount, Success, Error, ...)
 	local History = self.History
 	if HistoryCount == #History then
 		if Success then
 			for Position = Position + 3, self.Count, 3 do
-				if self[Position] == Enumeration.StatementTypes.Then or self[Position] == Enumeration.StatementTypes.Try then -- Enter next `Then` or `Try` function
+				if self[Position] == Enumeration.AttemptType.Then or self[Position] == Enumeration.AttemptType.Try then -- Enter next `Then` or `Try` function
 					self.LastArguments = {Error, ...}
 					History[HistoryCount + 1] = Position -- Log that we pcalled this statement
 					return Continue(self, Position, HistoryCount + 1, pcall(self[Position + 1], Error, ...)) -- Call next Then with arguments
@@ -21,7 +21,7 @@ local function Continue(self, Position, HistoryCount, Success, Error, ...)
 			end
 		else
 			for Position = Position + 3, self.Count, 3 do
-				if self[Position] == Enumeration.StatementTypes.Catch then -- Enter next `Catch` function
+				if self[Position] == Enumeration.AttemptType.Catch then -- Enter next `Catch` function
 					-- Get arguments and predicate count
 					local Arguments = self[Position + 1]
 					local PredicateCount = #Arguments - 1
@@ -48,10 +48,10 @@ local function Continue(self, Position, HistoryCount, Success, Error, ...)
 							local Type = self[Position]
 
 							local Message = (
-								Type == Enumeration.StatementTypes.Try and self[Position + 2]:match("Try.-[\n\r]([^\n\r]+)") .. " - upvalue Try\n" or
-								Type == Enumeration.StatementTypes.Then and self[Position + 2]:match("%- method Then[\n\r]([^\n\r]+)") .. " - method Then\n" or
-								Type == Enumeration.StatementTypes.Catch and self[Position + 2]:match("%- method Catch[\n\r]([^\n\r]+)") .. " - method Catch\n" or
-								Type == Enumeration.StatementTypes.Retry and self[Position + 2]:match("%- method Retry[\n\r]([^\n\r]+)") .. " - method Retry\n"
+								Type == Enumeration.AttemptType.Try and self[Position + 2]:match("Try.-[\n\r]([^\n\r]+)") .. " - upvalue Try\n" or
+								Type == Enumeration.AttemptType.Then and self[Position + 2]:match("%- method Then[\n\r]([^\n\r]+)") .. " - method Then\n" or
+								Type == Enumeration.AttemptType.Catch and self[Position + 2]:match("%- method Catch[\n\r]([^\n\r]+)") .. " - method Catch\n" or
+								Type == Enumeration.AttemptType.Retry and self[Position + 2]:match("%- method Retry[\n\r]([^\n\r]+)") .. " - method Retry\n"
 							)
 
 							if Message then
@@ -80,7 +80,7 @@ end
 
 local Attempt = {
 	__index = {
-		[0] = Enumeration.StatementTypes.Try;
+		[0] = Enumeration.AttemptType.Try;
 		Count = 2;
 		RetryCount = 0;
 		PreviousRetryCount = 0;
@@ -98,7 +98,7 @@ function Attempt.__index:Then(Function)
 	local Count = self.Count
 	self.Count = Count + 3
 
-	self[Count + 1] = Enumeration.StatementTypes.Then
+	self[Count + 1] = Enumeration.AttemptType.Then
 	self[Count + 2] = Function
 	self[Count + 3] = debug.traceback()
 
@@ -114,7 +114,7 @@ function Attempt.__index:Catch(...)
 	local Count = self.Count
 	self.Count = Count + 3
 
-	self[Count + 1] = Enumeration.StatementTypes.Catch
+	self[Count + 1] = Enumeration.AttemptType.Catch
 	self[Count + 2] = {...}
 	self[Count + 3] = debug.traceback()
 
@@ -140,16 +140,16 @@ function Attempt.__index:Retry()
 	local Count = self.Count
 	self.Count = Count + 3
 
-	self[Count + 1] = Enumeration.StatementTypes.Retry
+	self[Count + 1] = Enumeration.AttemptType.Retry
 	self[Count + 2] = true -- Place where we encountered an error: History[HistoryCount - 1]
 	self[Count + 3] = debug.traceback()
 
 	for a = HistoryCount - 1, 1, -1 do -- We subtract 1 from HistoryCount so as to not include the current statement
 		local ErrorPosition = History[a]
 		local Identity = self[ErrorPosition]
-		if Identity ~= Enumeration.StatementTypes.Retry then -- Find the last non-retry statement and start it up
-			History[HistoryCount + 1] = Count + 1 -- Log Enumeration.StatementTypes.Retry Position Above ^^
-			coroutine.resume(coroutine.create(Continue), self, ErrorPosition - 3, HistoryCount + 1, Identity ~= Enumeration.StatementTypes.Catch, unpack(self.LastArguments))
+		if Identity ~= Enumeration.AttemptType.Retry then -- Find the last non-retry statement and start it up
+			History[HistoryCount + 1] = Count + 1 -- Log Enumeration.AttemptType.Retry Position Above ^^
+			coroutine.resume(coroutine.create(Continue), self, ErrorPosition - 3, HistoryCount + 1, Identity ~= Enumeration.AttemptType.Catch, unpack(self.LastArguments))
 			return self
 		end
 	end
