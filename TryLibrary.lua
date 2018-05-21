@@ -8,6 +8,13 @@ local Enumeration = Resources:LoadLibrary("Enumeration")
 
 Enumeration.AttemptType = {"Try", "Then", "Catch", "Retry"}
 
+local Matches = {
+	[Enumeration.AttemptType.Try] = "( %- %l+ Try.-[\n\r])([^\n\r]+)";
+	[Enumeration.AttemptType.Then] = "( %- method Then[\n\r])([^\n\r]+)";
+	[Enumeration.AttemptType.Catch] = "( %- method Catch[\n\r])([^\n\r]+)";
+	[Enumeration.AttemptType.Retry] = "( %- method Retry[\n\r])([^\n\r]+)";
+}
+
 local function Continue(self, Position, HistoryCount, Success, Error, ...)
 	local History = self.History
 	if HistoryCount == #History then
@@ -43,19 +50,13 @@ local function Continue(self, Position, HistoryCount, Success, Error, ...)
 
 						-- Assemble Traceback
 						local Traceback = "Stack Begin\n"
+
 						for a = 1, HistoryCount do
 							local Position = History[a]
-							local Type = self[Position]
-
-							local Message = (
-								Type == Enumeration.AttemptType.Try and self[Position + 2]:match("Try.-[\n\r]([^\n\r]+)") .. " - upvalue Try\n" or
-								Type == Enumeration.AttemptType.Then and self[Position + 2]:match("%- method Then[\n\r]([^\n\r]+)") .. " - method Then\n" or
-								Type == Enumeration.AttemptType.Catch and self[Position + 2]:match("%- method Catch[\n\r]([^\n\r]+)") .. " - method Catch\n" or
-								Type == Enumeration.AttemptType.Retry and self[Position + 2]:match("%- method Retry[\n\r]([^\n\r]+)") .. " - method Retry\n"
-							)
+							local FunctionName, Message = self[Position + 2]:match(Matches[self[Position]])
 
 							if Message then
-								Traceback = Traceback .. Message
+								Traceback = Traceback .. Message .. FunctionName
 							end
 						end
 
